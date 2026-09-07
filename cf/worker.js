@@ -23,8 +23,8 @@ const fetchTextResponse = async (...args) => {
   }
 };
 
-const transact = async(payload)=>{
-  const req = new Request(`${env.WIX_HOST}/request`,{
+const transact = async(payload,env)=>{
+  const req = new Request(`${env?.WIX_HOST}/request`,{
     method:"POST",
     headers:{
       "transaction-id":`transaction-${crypto.randomUUID()}`,
@@ -40,7 +40,7 @@ export default {
   async fetch(request, env, ctx) {
     try {
       const payload = request.body ? (await request.text()) : request.url;
-      return await transact(payload);
+      return await transact(payload,env);
     } catch (e) {
       return new Response(String(e), {
         status: 500,
