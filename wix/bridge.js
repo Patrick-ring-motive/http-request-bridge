@@ -1,42 +1,59 @@
-
-import { ok, serverError } from 'wix-http-functions';
+import {
+  ok,
+  serverError
+} from 'wix-http-functions';
 import wixData from 'wix-data';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-class CMSTable{
-  constructor(tableName){
+class CMSTable {
+  constructor(tableName) {
     this.tableName = tableName;
   }
-  async where(prop,value){
-    try{
+  async where(prop, value) {
+    try {
       return await wixData
         .query(this.tableName)
-        .eq(prop,value)
+        .eq(prop, value)
         .find();
-    }catch(e){
-      console.warn(e,prop,value);
+    } catch (e) {
+      console.warn(e, prop, value);
     }
   }
-  async insert(value){
-    try{
-      return await wixData.insert(this.tableName,value,{ suppressAuth: true });
-    }catch(e){
-      console.warn(e,value);
+  async insert(value) {
+    try {
+      return await wixData.insert(this.tableName, value, {
+        suppressAuth: true
+      });
+    } catch (e) {
+      console.warn(e, value);
     }
   }
-  async update(id,value){
-    try{
-      return await wixData.update(this.tableName,{...id,...value},{ suppressAuth: true });
-    }catch(e){
-      console.warn(e,id,value);
+  async update(id, value) {
+    try {
+      return await wixData.update(this.tableName, {
+        ...id,
+        ...value
+      }, {
+        suppressAuth: true
+      });
+    } catch (e) {
+      console.warn(e, id, value);
     }
   }
   async upsert(id, value = {}) {
     try {
-      const item = typeof id === 'string' ? { _id: id, ...value } : { ...id, ...value };
-      return await wixData.save(this.tableName, item, { suppressAuth: true });
-    } catch(e) {
+      const item = typeof id === 'string' ? {
+        _id: id,
+        ...value
+      } : {
+        ...id,
+        ...value
+      };
+      return await wixData.save(this.tableName, item, {
+        suppressAuth: true
+      });
+    } catch (e) {
       console.warn(e, id, value);
     }
   }
@@ -45,8 +62,8 @@ class CMSTable{
 const requests = new CMSTable('requests');
 const responses = new CMSTable('responses');
 
-async function handleRequest(fn,args=[]){
-  try{
+async function handleRequest(fn, args = []) {
+  try {
     return await fn(...args);
   } catch (err) {
     return serverError({
@@ -57,42 +74,42 @@ async function handleRequest(fn,args=[]){
   }
 }
 
-const jsonResponse = x =>{
+const jsonResponse = x => {
   return ok({
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin":"*"
-      },
-      body: x
-    });
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    },
+    body: x
+  });
 };
 
 export async function get_items(request) {
-  return handleRequest(async()=>{
+  return handleRequest(async () => {
     const results = await wixData
       .query("env")
       .limit(100)
       .find();
 
     return jsonResponse({
-        items: results.items,
-        totalCount: results.totalCount
-      });
+      items: results.items,
+      totalCount: results.totalCount
+    });
   });
 }
 
 export async function get_requests(request) {
-  return handleRequest(async()=>{
-    const results = await responses.where('transaction_status','started');
+  return handleRequest(async () => {
+    const results = await responses.where('transaction_status', 'started');
     return jsonResponse({
-        items: results.items,
-        totalCount: results.totalCount
-      });
+      items: results.items,
+      totalCount: results.totalCount
+    });
   });
 }
 
 export async function post_request(request) {
-  return handleRequest(async()=>{
+  return handleRequest(async () => {
     const transactionId = request.headers['transaction-id'] || `transaction-${Math.random()}`;
     await requests.insert({
       transaction_id: transactionId,
@@ -100,64 +117,75 @@ export async function post_request(request) {
       transaction_created: +request.headers['transaction-created'],
       payload: await (await request.body).text(),
     });
-    let result = await responses.where('transaction_id',transactionId);
-    while(!result?.totalCount){
+    let result = await responses.where('transaction_id', transactionId);
+    while (!result?.totalCount) {
       await sleep(1000);
-      result = await responses.where('transaction_id',transactionId);
+      result = await responses.where('transaction_id', transactionId);
     }
     return jsonResponse(result);
   });
 }
 
-import { elevate } from 'wix-auth';
-import { collections } from 'wix-data.v2';
+import {
+  elevate
+} from 'wix-auth';
+import {
+  collections
+} from 'wix-data.v2';
 
 const listDataCollections = elevate(collections.listDataCollections);
 
 export async function get_schemas(request) {
-  return handleRequest(async()=>{
+  return handleRequest(async () => {
     const result = await listDataCollections();
-    return jsonResponse(result.collections.filter(x=>/request|responses/.test(x.displayName)).map(x=>x.fields.filter(x=>!x.systemField).map(y=>y.displayName)));
+    return jsonResponse(result.collections.filter(x => /request|responses/.test(x.displayName)).map(x => x.fields.filter(x => !x.systemField).map(y => y.displayName)));
   });
 }
 
-export async function post_response(request){
-  return handleRequest(async()=>{
+export async function post_response(request) {
+  return handleRequest(async () => {
     const items = JSON.parse(await (await request.body).text());
-    for(const item of items){
-          const results = await requests.where('transaction_id',item.transaction_id);
-          for(const req of results?.items ?? []){
-            await requests.update(req,{transaction_status:'done'});
-          }
-          await responses.upsert(item);
-    } 
+    for (const item of items) {
+      const results = await requests.where('transaction_id', item.transaction_id);
+      for (const req of results?.items ?? []) {
+        await requests.update(req, {
+          transaction_status: 'done'
+        });
+      }
+      await responses.upsert(item);
+    }
     return jsonResponse({});
   });
 }
 
-export async function get_listen(request){
-  while(true){
-    try{
-        const results = await requests.where('transaction_status','started');
-        for(const req of results?.items ?? []){
-          await requests.update(req,{transaction_status:'claimed'});
-          await responses.upsert({transaction_id:req.transaction_id,response:'claimed'});
-        }
-        if(results?.items?.length){
-          return jsonResponse(results);
-        }else{
-          await sleep(1000);
-        }
-    }catch(e){
-        console.warn(e);
+export async function get_listen(request) {
+  while (true) {
+    try {
+      const results = await requests.where('transaction_status', 'started');
+      for (const req of results?.items ?? []) {
+        await requests.update(req, {
+          transaction_status: 'claimed'
+        });
+        await responses.upsert({
+          transaction_id: req.transaction_id,
+          response: 'claimed'
+        });
+      }
+      if (results?.items?.length) {
+        return jsonResponse(results);
+      } else {
+        await sleep(1000);
+      }
+    } catch (e) {
+      console.warn(e);
     }
   }
 }
 
-export async function get_delete(request){
-  return handleRequest(async()=>{
-      await cleanupOldRecords();
-      return jsonResponse({});
+export async function get_delete(request) {
+  return handleRequest(async () => {
+    await cleanupOldRecords();
+    return jsonResponse({});
   });
 }
 
@@ -169,16 +197,22 @@ async function cleanupOldRecords() {
     let results = await wixData.query(collection)
       .lt('_createdDate', cutoffDate)
       .limit(1000)
-      .find({ suppressAuth: true });
+      .find({
+        suppressAuth: true
+      });
 
     while (results.items.length > 0) {
       const idsToDelete = results.items.map(item => item._id);
-      
+
       // Bypass collection permissions
-      await wixData.bulkRemove(collection, idsToDelete, { suppressAuth: true });
+      await wixData.bulkRemove(collection, idsToDelete, {
+        suppressAuth: true
+      });
 
       if (results.hasNext()) {
-        results = await results.next({ suppressAuth: true });
+        results = await results.next({
+          suppressAuth: true
+        });
       } else {
         break;
       }
@@ -186,14 +220,14 @@ async function cleanupOldRecords() {
   }
 }
 
-(async()=>{
+(async () => {
 
-  while(true){
-    try{
+  while (true) {
+    try {
       await cleanupOldRecords();
       await sleep(1000);
-    }catch(e){
-        console.warn(e);
+    } catch (e) {
+      console.warn(e);
     }
   }
 
